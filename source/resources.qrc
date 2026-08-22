@@ -1,0 +1,33 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/icons">
+        <file>icons/new.svg</file>
+        <file>icons/open.svg</file>
+        <file>icons/save.svg</file>
+        <file>icons/saveas.svg</file>
+        <file>icons/undo.svg</file>
+        <file>icons/redo.svg</file>
+        <file>icons/cut.svg</file>
+        <file>icons/copy.svg</file>
+        <file>icons/paste.svg</file>
+        <file>icons/bold.svg</file>
+        <file>icons/italic.svg</file>
+        <file>icons/underline.svg</file>
+        <file>icons/alignleft.svg</file>
+        <file>icons/aligncenter.svg</file>
+        <file>icons/alignright.svg</file>
+        <file>icons/page.svg</file>
+        <file>icons/image.svg</file>
+        <file>icons/table.svg</file>
+        <file>icons/link.svg</file>
+        <file>icons/find.svg</file>
+        <file>icons/settings.svg</file>
+        <file>icons/import.svg</file>
+        <file>icons/publish.svg</file>
+        <file>icons/restore.svg</file>
+        <file>icons/close.svg</file>
+        <file>icons/contents.svg</file>
+        <file>icons/files.svg</file>
+        <file>icons/preview.svg</file>
+    </qresource>
+</RCC>

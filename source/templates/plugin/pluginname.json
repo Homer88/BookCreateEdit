@@ -1,0 +1,5 @@
+{
+    "id": "__PLUGIN_NAME_LOWER__",
+    "name": "__PLUGIN_DISPLAY_NAME__",
+    "version": "1.0.0"
+}

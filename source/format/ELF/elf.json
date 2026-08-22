@@ -1,0 +1,7 @@
+{
+    "Keys": ["com.bookcreateedit.format.elf"],
+    "MetaData": {
+        "name": "ELF",
+        "description": "Self-contained ELF executable book format"
+    }
+}
