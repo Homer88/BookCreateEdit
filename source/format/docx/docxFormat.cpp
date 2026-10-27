@@ -1,5 +1,6 @@
-﻿#include "docxFormat.h"
+#include "docxFormat.h"
 #include "BookDocument.h"
+#include "../ziputil.h"
 
 #include <QFile>
 #include <QDir>
@@ -10,6 +11,7 @@
 #include <QDomNode>
 #include <QDebug>
 #include <QtEndian>
+#include <QMap>
 
 // Minimal ZIP writer for DOCX
 class SimpleZipWriter
@@ -172,45 +174,15 @@ bool DocxPlugin::read(const QString &filePath, BookDocument *doc)
     QByteArray zipData = file.readAll();
     file.close();
 
-    // Parse ZIP to find word/document.xml
-    int pos = 0;
-    struct ZipLocalFile {
-        QString name;
-        int offset;
-        int size;
-    };
-
-    QList<ZipLocalFile> files;
-
-    while (pos + 30 <= zipData.size()) {
-        if (zipData.mid(pos, 4) != "PK\x03\x04")
-            break;
-
-        quint16 nameLen = qFromLittleEndian<quint16>(zipData.mid(pos + 26, 2));
-        quint16 extraLen = qFromLittleEndian<quint16>(zipData.mid(pos + 28, 2));
-        quint32 compSize = qFromLittleEndian<quint32>(zipData.mid(pos + 18, 4));
-        quint32 uncompSize = qFromLittleEndian<quint32>(zipData.mid(pos + 22, 4));
-
-        QString name = QString::fromUtf8(zipData.mid(pos + 30, nameLen));
-        int dataOffset = pos + 30 + nameLen + extraLen;
-
-        ZipLocalFile zlf;
-        zlf.name = name;
-        zlf.offset = dataOffset;
-        zlf.size = (compSize > 0) ? compSize : uncompSize;
-        files.append(zlf);
-
-        pos = dataOffset + zlf.size;
-    }
+    // Читаем ВСЕ записи архива (stored + deflate) через общий ZipUtil.
+    // Настоящие DOCX-файлы сжаты deflate — раньше они не импортировались.
+    QMap<QString, QByteArray> files;
+    const auto entries = ZipUtil::readZip(zipData);
+    for (const ZipUtil::ZipEntry &e : entries)
+        files.insert(e.name, e.data);
 
     // Find document.xml
-    QByteArray docXmlData;
-    for (const ZipLocalFile &f : files) {
-        if (f.name == "word/document.xml") {
-            docXmlData = zipData.mid(f.offset, f.size);
-            break;
-        }
-    }
+    QByteArray docXmlData = files.value("word/document.xml");
 
     if (docXmlData.isEmpty()) {
         if (m_context)
@@ -232,20 +204,17 @@ bool DocxPlugin::read(const QString &filePath, BookDocument *doc)
     // Extract document properties (meta)
     BookMeta meta;
     // Try to read from app.xml or core.xml
-    for (const ZipLocalFile &f : files) {
-        if (f.name == "docProps/core.xml") {
-            QByteArray coreData = zipData.mid(f.offset, f.size);
-            QDomDocument coreDoc;
-            if (coreDoc.setContent(coreData)) {
-                QDomElement coreRoot = coreDoc.documentElement();
-                QDomElement dcTitle = coreRoot.firstChildElement("dc:title");
-                if (!dcTitle.isNull())
-                    meta.title = dcTitle.text();
-                QDomElement dcCreator = coreRoot.firstChildElement("dc:creator");
-                if (!dcCreator.isNull())
-                    meta.author = dcCreator.text();
-            }
-            break;
+    if (files.contains("docProps/core.xml")) {
+        QByteArray coreData = files.value("docProps/core.xml");
+        QDomDocument coreDoc;
+        if (coreDoc.setContent(coreData)) {
+            QDomElement coreRoot = coreDoc.documentElement();
+            QDomElement dcTitle = coreRoot.firstChildElement("dc:title");
+            if (!dcTitle.isNull())
+                meta.title = dcTitle.text();
+            QDomElement dcCreator = coreRoot.firstChildElement("dc:creator");
+            if (!dcCreator.isNull())
+                meta.author = dcCreator.text();
         }
     }
 

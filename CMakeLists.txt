@@ -12,11 +12,13 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets Xml)
 set(CORE_SOURCES
     source/BookDocument.cpp
     source/HtmlConverter.cpp
+    source/ProjectManager.cpp
 )
 
 set(CORE_HEADERS
     source/BookDocument.h
     source/HtmlConverter.h
+    source/ProjectManager.h
     source/interfaces/IBookPlugin.h
     source/interfaces/IBookFormat.h
 )
@@ -42,6 +44,7 @@ set(SOURCES
     source/PluginManager.cpp
     source/ImportDialog.cpp
     source/ThemeManager.cpp
+    source/NewProjectDialog.cpp
 )
 
 set(HEADERS
@@ -57,6 +60,7 @@ set(HEADERS
     source/PluginManager.h
     source/ImportDialog.h
     source/ThemeManager.h
+    source/NewProjectDialog.h
 )
 
 set(RESOURCES

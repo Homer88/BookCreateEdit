@@ -104,7 +104,7 @@ QString ExePlugin::fileExtension() const { return "exe"; }
 QStringList ExePlugin::supportedExtensions() const { return {"exe"}; }
 QStringList ExePlugin::mimeTypes() const { return {"application/x-exe"}; }
 
-bool ExePlugin::canRead() const { return true; }
+bool ExePlugin::canRead() const { return false; } // EXE — только запись (dosc.md)
 bool ExePlugin::canWrite() const { return true; }
 
 bool ExePlugin::read(const QString &filePath, BookDocument *doc)

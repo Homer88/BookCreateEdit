@@ -1,4 +1,4 @@
-﻿#ifndef HELPMANUALFORMAT_H
+#ifndef HELPMANUALFORMAT_H
 #define HELPMANUALFORMAT_H
 
 #include <QObject>
@@ -22,7 +22,7 @@ class HelpManualFormat : public QObject, public IBookFormat
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.bookcreateedit.format/1.0" FILE "helpandmain.json")
-    Q_INTERFACES(IBookFormat)
+    Q_INTERFACES(IBookFormat IBookPlugin)
 
 public:
     explicit HelpManualFormat(QObject *parent = nullptr);

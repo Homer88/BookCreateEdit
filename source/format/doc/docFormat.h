@@ -1,4 +1,4 @@
-﻿#ifndef DocFORMAT_H
+#ifndef DocFORMAT_H
 #define DocFORMAT_H
 
 #include <QObject>
@@ -8,7 +8,7 @@ class DocPlugin : public QObject, public IBookFormat
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.bookcreateedit.format/1.0" FILE "doc.json")
-    Q_INTERFACES(IBookFormat)
+    Q_INTERFACES(IBookFormat IBookPlugin)
 
 public:
     explicit DocPlugin(QObject *parent = nullptr);

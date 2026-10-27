@@ -1,4 +1,4 @@
-﻿#ifndef Pdf_FORMAT_H
+#ifndef Pdf_FORMAT_H
 #define Pdf_FORMAT_H
 
 #include <QObject>
@@ -8,7 +8,7 @@ class PdfPlugin : public QObject, public IBookFormat
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.bookcreateedit.format/1.0" FILE "pdf.json")
-    Q_INTERFACES(IBookFormat)
+    Q_INTERFACES(IBookFormat IBookPlugin)
 
 public:
     explicit PdfPlugin(QObject *parent = nullptr);

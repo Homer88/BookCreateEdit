@@ -1,4 +1,4 @@
-﻿#ifndef TxtFORMAT_H
+#ifndef TxtFORMAT_H
 #define TxtFORMAT_H
 
 #include <QObject>
@@ -8,7 +8,7 @@ class TxtPlugin : public QObject, public IBookFormat
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.bookcreateedit.format/1.0" FILE "txt.json")
-    Q_INTERFACES(IBookFormat)
+    Q_INTERFACES(IBookFormat IBookPlugin)
 
 public:
     explicit TxtPlugin(QObject *parent = nullptr);

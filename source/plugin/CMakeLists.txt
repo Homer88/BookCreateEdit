@@ -9,3 +9,6 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets Xml)
 
 add_subdirectory(spellchecker)
 add_subdirectory(diagramrenderer)
+add_subdirectory(git)
+add_subdirectory(gtranslate)
+add_subdirectory(ytranslate)

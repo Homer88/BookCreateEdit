@@ -1,4 +1,4 @@
-﻿#ifndef Fb3FORMAT_H
+#ifndef Fb3FORMAT_H
 #define Fb3FORMAT_H
 
 #include <QObject>
@@ -8,7 +8,7 @@ class Fb3Plugin : public QObject, public IBookFormat
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.bookcreateedit.format/1.0" FILE "fb3.json")
-    Q_INTERFACES(IBookFormat)
+    Q_INTERFACES(IBookFormat IBookPlugin)
 
 public:
     explicit Fb3Plugin(QObject *parent = nullptr);

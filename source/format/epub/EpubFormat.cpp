@@ -1,5 +1,6 @@
 #include "EpubFormat.h"
 #include "BookDocument.h"
+#include "../ziputil.h"
 
 #include <QFile>
 #include <QDir>
@@ -11,6 +12,7 @@
 #include <QUuid>
 #include <QDebug>
 #include <QtEndian>
+#include <QMap>
 
 // Minimal ZIP writer for EPUB/DOCX
 class SimpleZipWriter
@@ -186,43 +188,41 @@ bool EpubFormat::readEpub(const QString &path, BookDocument *doc)
     QByteArray zipData = file.readAll();
     file.close();
 
-    // Parse ZIP: find content.opf and XHTML files
-    int pos = 0;
-    struct ZipLocalFile {
-        QString name;
-        int offset;
-        int size;
-    };
+    // Читаем ВСЕ записи архива (stored + deflate) через общий ZipUtil.
+    // Раньше понимались только несжатые записи, поэтому настоящие EPUB
+    // (Calibre, Sigil и пр.) не импортировались.
+    QString zipError;
+    QMap<QString, QByteArray> files;
+    const auto entries = ZipUtil::readZip(zipData, &zipError);
+    for (const ZipUtil::ZipEntry &e : entries)
+        files.insert(e.name, e.data);
 
-    QList<ZipLocalFile> files;
-
-    while (pos + 30 <= zipData.size()) {
-        if (zipData.mid(pos, 4) != "PK\x03\x04")
-            break;
-
-        quint16 nameLen = qFromLittleEndian<quint16>(zipData.mid(pos + 26, 2));
-        quint16 extraLen = qFromLittleEndian<quint16>(zipData.mid(pos + 28, 2));
-        quint32 compSize = qFromLittleEndian<quint32>(zipData.mid(pos + 18, 4));
-        quint32 uncompSize = qFromLittleEndian<quint32>(zipData.mid(pos + 22, 4));
-
-        QString name = QString::fromUtf8(zipData.mid(pos + 30, nameLen));
-        int dataOffset = pos + 30 + nameLen + extraLen;
-
-        ZipLocalFile zlf;
-        zlf.name = name;
-        zlf.offset = dataOffset;
-        zlf.size = (compSize > 0) ? compSize : uncompSize;
-        files.append(zlf);
-
-        pos = dataOffset + zlf.size;
+    if (files.isEmpty()) {
+        if (m_context)
+            m_context->log("EPUB: пустой или повреждённый архив (" + zipError + ")");
+        return false;
     }
 
-    // Find content.opf
+    // Путь к OPF берём из META-INF/container.xml
     QString opfPath;
-    for (const ZipLocalFile &f : files) {
-        if (f.name.endsWith("content.opf")) {
-            opfPath = f.name;
-            break;
+    if (files.contains("META-INF/container.xml")) {
+        QDomDocument containerDoc;
+        if (containerDoc.setContent(files.value("META-INF/container.xml"))) {
+            QDomElement rootfile = containerDoc.documentElement()
+                .firstChildElement("rootfiles")
+                .firstChildElement("rootfile");
+            if (!rootfile.isNull())
+                opfPath = rootfile.attribute("full-path");
+        }
+    }
+
+    // Резервный вариант — поиск по имени
+    if (opfPath.isEmpty()) {
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            if (it.key().endsWith("content.opf")) {
+                opfPath = it.key();
+                break;
+            }
         }
     }
 
@@ -232,33 +232,7 @@ bool EpubFormat::readEpub(const QString &path, BookDocument *doc)
         return false;
     }
 
-    // Read container.xml to find OPF path
-    for (const ZipLocalFile &f : files) {
-        if (f.name == "META-INF/container.xml") {
-            QByteArray data = zipData.mid(f.offset, f.size);
-            QDomDocument containerDoc;
-            if (containerDoc.setContent(data)) {
-                QDomElement rootfile = containerDoc.documentElement()
-                    .firstChildElement("rootfiles")
-                    .firstChildElement("rootfile");
-                if (!rootfile.isNull()) {
-                    opfPath = rootfile.attribute("full-path");
-                    // Update files list with correct OPF path
-                    break;
-                }
-            }
-        }
-    }
-
-    // Read OPF
-    QByteArray opfData;
-    for (const ZipLocalFile &f : files) {
-        if (f.name == opfPath) {
-            opfData = zipData.mid(f.offset, f.size);
-            break;
-        }
-    }
-
+    QByteArray opfData = files.value(opfPath);
     if (opfData.isEmpty())
         return false;
 
@@ -312,9 +286,10 @@ bool EpubFormat::readEpub(const QString &path, BookDocument *doc)
     // Read XHTML files
     for (const QString &href : spineOrder) {
         QString fullPath = opfDir + href;
-        for (const ZipLocalFile &f : files) {
-            if (f.name == fullPath) {
-                QByteArray xhtmlData = zipData.mid(f.offset, f.size);
+        QByteArray xhtmlData = files.value(fullPath);
+        if (xhtmlData.isEmpty() && files.contains(href))
+            xhtmlData = files.value(href);
+        if (!xhtmlData.isEmpty()) {
                 QDomDocument xhtmlDoc;
                 if (xhtmlDoc.setContent(xhtmlData)) {
                     QDomElement htmlEl = xhtmlDoc.documentElement();
@@ -404,8 +379,6 @@ bool EpubFormat::readEpub(const QString &path, BookDocument *doc)
                         doc->setPageXml(doc->pageCount() - 1, bceDoc.toString(-1));
                     }
                 }
-                break;
-            }
         }
     }
 

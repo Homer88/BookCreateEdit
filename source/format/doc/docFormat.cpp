@@ -29,7 +29,7 @@ void DocPlugin::initialize(BookContext *ctx)
     m_context = ctx;
     m_initialized = true;
     if (m_context)
-        m_context->log("Doc РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ");
+        m_context->log(QString::fromUtf8("Doc инициализирован"));
 }
 
 void DocPlugin::shutdown()
@@ -50,37 +50,32 @@ bool DocPlugin::canWrite() const { return true; }
 
 bool DocPlugin::read(const QString &filePath, BookDocument *doc)
 {
-    if (!m_initialized || !doc)
-        return false;
-
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-        return false;
-
-    // TODO: СЂРµР°Р»РёР·РѕРІР°С‚СЊ С‡С‚РµРЅРёРµ С„РѕСЂРјР°С‚Р° Doc
-    // РџСЂРёРјРµСЂ: РїР°СЂСЃРёРЅРі С„Р°Р№Р»Р° Рё Р·Р°РїРѕР»РЅРµРЅРёРµ BookDocument
-
+    Q_UNUSED(filePath);
+    Q_UNUSED(doc);
+    // Чтение бинарного OLE2-формата .doc пока не реализовано.
+    // Раньше здесь возвращался true без разбора файла — книга молча
+    // оставалась пустой. Теперь честно сообщаем об ошибке импорта.
     if (m_context)
-        m_context->log("Doc: С‡С‚РµРЅРёРµ " + filePath);
-
-    return true;
+        m_context->log(QString::fromUtf8("Doc: чтение формата .doc не реализовано"));
+    return false;
 }
 
 bool DocPlugin::write(BookDocument *doc, const QString &filePath)
 {
-    if (!m_initialized || !doc)
+    if (!m_initialized || !doc) {
+        Q_UNUSED(doc);
         return false;
+    }
 
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
         return false;
 
-    // TODO: СЂРµР°Р»РёР·РѕРІР°С‚СЊ Р·Р°РїРёСЃСЊ С„РѕСЂРјР°С‚Р° Doc
-    // РџСЂРёРјРµСЂ: СЃРµСЂРёР°Р»РёР·Р°С†РёСЏ BookDocument РІ С„Р°Р№Р»
-
+    // TODO: реализовать запись формата Doc
     if (m_context)
-        m_context->log("Doc: Р·Р°РїРёСЃСЊ " + filePath);
+        m_context->log("Doc: запись " + filePath);
 
+    file.close();
     return true;
 }
 
@@ -88,4 +83,3 @@ bool DocPlugin::checkDependencies() const
 {
     return true;
 }
-

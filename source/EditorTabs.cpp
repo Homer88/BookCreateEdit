@@ -18,6 +18,7 @@ EditorTabs::EditorTabs(QWidget *parent)
     , m_syncing(false)
     , m_lastWysiwygHash(0)
     , m_lastXmlHash(0)
+    , m_scale(1.0)
 {
     m_syncWysiwygTimer.setSingleShot(true);
     m_syncWysiwygTimer.setInterval(250);
@@ -36,35 +37,40 @@ void EditorTabs::setupUI()
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    QHBoxLayout *topBar = new QHBoxLayout();
+    // Верхняя полоса со списком страниц скрыта целиком: навигация по
+    // страницам выполняется через дерево оглавления слева. Сам QTabWidget
+    // остаётся рабочим (переключение и подсчёт страниц идут через него).
+    QWidget *topBarWidget = new QWidget(this);
+    QHBoxLayout *topBar = new QHBoxLayout(topBarWidget);
     topBar->setContentsMargins(4, 4, 4, 4);
     topBar->setSpacing(4);
 
-    QLabel *lblPages = new QLabel("Страницы:", this);
+    QLabel *lblPages = new QLabel("Страницы:", topBarWidget);
     lblPages->setStyleSheet("font-weight: bold;");
     topBar->addWidget(lblPages);
 
-    m_pageTabs = new QTabWidget(this);
+    m_pageTabs = new QTabWidget(topBarWidget);
     m_pageTabs->setTabsClosable(true);
     m_pageTabs->setMovable(true);
     m_pageTabs->setMaximumHeight(32);
     topBar->addWidget(m_pageTabs, 1);
 
-    QToolButton *btnAddPage = new QToolButton(this);
+    QToolButton *btnAddPage = new QToolButton(topBarWidget);
     btnAddPage->setText("+");
     btnAddPage->setToolTip("Добавить страницу");
     btnAddPage->setFixedSize(28, 24);
     btnAddPage->setStyleSheet("QToolButton { font-weight: bold; font-size: 14px; }");
     topBar->addWidget(btnAddPage);
 
-    QToolButton *btnRemovePage = new QToolButton(this);
+    QToolButton *btnRemovePage = new QToolButton(topBarWidget);
     btnRemovePage->setText("-");
     btnRemovePage->setToolTip("Удалить страницу");
     btnRemovePage->setFixedSize(28, 24);
     btnRemovePage->setStyleSheet("QToolButton { font-weight: bold; font-size: 14px; }");
     topBar->addWidget(btnRemovePage);
 
-    mainLayout->addLayout(topBar);
+    mainLayout->addWidget(topBarWidget);
+    topBarWidget->setVisible(false);
 
     m_viewTabs = new QTabWidget(this);
 
@@ -144,12 +150,40 @@ void EditorTabs::newDocument()
 
 void EditorTabs::setCurrentPage(int index)
 {
-    if (index >= 0 && index < m_pageTabs->count()) {
-        saveCurrentPage();
-        m_currentPageIndex = index;
-        m_pageTabs->setCurrentIndex(index);
-        loadPage(index);
+    if (!m_document || m_document->pageCount() == 0)
+        return;
+
+    // Самовосстановление: после полной замены документа (загрузка файла,
+    // новый проект, импорт) вкладки могли остаться от старого содержимого.
+    // Без пересборки переключение молча игнорировалось, а текст уходил
+    // в несуществующий индекс.
+    if (m_pageTabs->count() != m_document->pageCount()) {
+        reloadFromDocument(index >= 0 && index < m_document->pageCount()
+                               ? index : 0);
+        return;
     }
+
+    if (index < 0 || index >= m_pageTabs->count())
+        return;
+
+    // Защита от повторного входа: m_pageTabs->setCurrentIndex()
+    // синхронно вызывает лямбду currentChanged, которая тоже сохраняет
+    // и загружает страницу. Без флага старый текст успевал «переехать»
+    // на новую страницу.
+    if (m_syncing)
+        return;
+    if (index == m_currentPageIndex && index == m_pageTabs->currentIndex())
+        return;
+
+    saveCurrentPage();                 // сохраняем СТАРУЮ страницу
+
+    m_syncing = true;
+    m_currentPageIndex = index;
+    m_pageTabs->setCurrentIndex(index); // лямбда заблокирована флагом
+    loadPage(index);
+    m_syncing = false;
+
+    emit currentPageChanged(index);
 }
 
 int EditorTabs::currentPage() const
@@ -177,6 +211,73 @@ void EditorTabs::addPage()
 void EditorTabs::removeCurrentPage()
 {
     onRemovePage();
+}
+
+/**
+ * @brief Сохраняет активный редактор (WYSIWYG или XML) в текущую страницу.
+ *
+ * Нужен перед структурными операциями со списком страниц: пока индексы
+ * не сдвинулись, буфер редактора должен попасть в «свою» страницу.
+ */
+void EditorTabs::flushCurrentPage()
+{
+    saveCurrentPage();
+}
+
+void EditorTabs::applyScale(int percent)
+{
+    m_scale = percent / 100.0;
+    int bodyFs = qMax(6, qRound(14 * m_scale));
+    int bodyPad = qMax(4, qRound(20 * m_scale));
+    int h1Fs = qMax(10, qRound(24 * m_scale));
+    int h2Fs = qMax(10, qRound(20 * m_scale));
+    int h3Fs = qMax(8, qRound(16 * m_scale));
+    int preFs = qMax(6, qRound(13 * m_scale));
+    int prePad = qMax(4, qRound(12 * m_scale));
+    int diagFs = qMax(6, qRound(12 * m_scale));
+
+    m_wysiwygEditor->setStyleSheet(QString(R"(
+        QTextEdit {
+            background-color: white;
+            border: 1px solid #c0c0c0;
+            font-family: "Times New Roman", serif;
+            font-size: %1px;
+            padding: %2px;
+        }
+    )").arg(bodyFs).arg(bodyPad));
+
+    if (m_xmlEditor)
+        m_xmlEditor->applyScale(percent);
+
+    if (m_document && m_currentPageIndex >= 0 && m_currentPageIndex < m_document->pageCount())
+        loadPage(m_currentPageIndex);
+}
+
+/**
+ * @brief Пересоздаёт вкладки страниц по документу и открывает selectIndex.
+ * @param selectIndex Желаемый индекс страницы (-1 — оставить текущий).
+ */
+void EditorTabs::reloadFromDocument(int selectIndex)
+{
+    rebuildPageTabs();
+    if (!m_document || m_document->pageCount() == 0)
+        return;
+
+    // Приводим индекс к допустимому диапазону
+    if (selectIndex < 0)
+        selectIndex = m_currentPageIndex;
+    selectIndex = qBound(0, selectIndex, m_document->pageCount() - 1);
+
+    // Флаг блокирует лямбду currentChanged, чтобы страница не сохранялась
+    // и не загружалась дважды
+    m_syncing = true;
+    m_currentPageIndex = selectIndex;
+    m_pageTabs->setCurrentIndex(selectIndex);
+    loadPage(selectIndex);
+    m_syncing = false;
+
+    emit pageCountChanged(m_document->pageCount());
+    emit currentPageChanged(selectIndex);
 }
 
 void EditorTabs::setFont(const QFont &font)
@@ -478,11 +579,11 @@ QString EditorTabs::wysiwygToXml(const QString &html) const
     xml.replace(QRegularExpression("<img\\s+src=\"([^\"]*)\"[^>]*>"),
                  "<image src=\"\\1\"/>");
 
-    xml.replace("&nbsp;", " ");
-    xml.replace("&amp;", "&");
-    xml.replace("&lt;", "<");
-    xml.replace("&gt;", ">");
-    xml.replace("&quot;", "\"");
+    // &nbsp; заменяем на числовую сущность, допустимую в XML.
+    // Остальные сущности (&amp; &lt; &gt; &quot;) НЕ разэкранируем —
+    // иначе литеральные символы портят XML и содержимое терялось
+    // при сохранении/загрузке.
+    xml.replace("&nbsp;", "&#160;");
 
     xml.replace(QRegularExpression("\n{3,}"), "\n\n");
 
@@ -524,20 +625,31 @@ QString EditorTabs::wysiwygToXml(const QString &html) const
 QString EditorTabs::xmlToWysiwyg(const QString &xml) const
 {
     QString html = xml;
+    int bodyFs = qMax(6, qRound(14 * m_scale));
+    int bodyPad = qMax(4, qRound(20 * m_scale));
+    int h1Fs = qMax(10, qRound(24 * m_scale));
+    int h2Fs = qMax(10, qRound(20 * m_scale));
+    int h3Fs = qMax(8, qRound(16 * m_scale));
+    int preFs = qMax(6, qRound(13 * m_scale));
+    int prePad = qMax(4, qRound(12 * m_scale));
+    int diagFs = qMax(6, qRound(12 * m_scale));
+    int tdPad = qMax(2, qRound(8 * m_scale));
+    int tblMargin = qMax(2, qRound(12 * m_scale));
 
     html.replace(QRegularExpression("<\\?xml[^?]*\\?>"), "");
     html.replace("<page>", "<body>");
     html.replace("</page>", "</body>");
 
     html.replace("<body>",
-        "<body style=\"font-family: 'Times New Roman', serif; font-size: 14px; padding: 20px; line-height: 1.6;\">");
+        QString("<body style=\"font-family: 'Times New Roman', serif; font-size: %1px; padding: %2px; line-height: 1.6;\">")
+            .arg(bodyFs).arg(bodyPad));
 
     html.replace(QRegularExpression("<table([^>]*)>"),
-                 "<table\\1 style=\"border-collapse: collapse; width: 100%; margin: 12px 0;\">");
+                 QString("<table\\1 style=\"border-collapse: collapse; width: 100%; margin: %1px 0;\">").arg(tblMargin));
     html.replace(QRegularExpression("<td([^>]*)>"),
-                 "<td\\1 style=\"border: 1px solid #ccc; padding: 8px; vertical-align: top;\">");
+                 QString("<td\\1 style=\"border: 1px solid #ccc; padding: %1px; vertical-align: top;\">").arg(tdPad));
     html.replace(QRegularExpression("<th([^>]*)>"),
-                 "<th\\1 style=\"border: 1px solid #ccc; padding: 8px; background: #f0f0f0; font-weight: bold;\">");
+                 QString("<th\\1 style=\"border: 1px solid #ccc; padding: %1px; background: #f0f0f0; font-weight: bold;\">").arg(tdPad));
 
     html.replace(QRegularExpression("<collapsible\\s+title=\"([^\"]*)\"[^>]*>"),
                  "<details style=\"border: 1px solid #ccc; margin: 8px 0; border-radius: 4px; padding: 4px 8px;\">"
@@ -551,9 +663,9 @@ QString EditorTabs::xmlToWysiwyg(const QString &xml) const
                  "\\1</div>");
 
     html.replace(QRegularExpression("<diagram\\s+engine=\"([^\"]*)\"[^>]*>([\\s\\S]*?)</diagram>"),
-                 "<div style=\"text-align: center; padding: 16px; margin: 12px 0; "
+                 QString("<div style=\"text-align: center; padding: 16px; margin: 12px 0; "
                  "background: #f0f8ff; border: 2px dashed #6699cc; border-radius: 6px;\">"
-                 "<div style=\"color: #6699cc; font-size: 12px;\">[Диаграмма (\\1)]</div></div>");
+                 "<div style=\"color: #6699cc; font-size: %1px;\">[Диаграмма (\\1)]</div></div>").arg(diagFs));
 
     html.replace(QRegularExpression("<image\\s+src=\"([^\"]*)\"\\s+width=\"([^\"]*)\"[^/]*/>"),
                  "<div style=\"text-align: center; margin: 12px 0;\">"
@@ -565,14 +677,18 @@ QString EditorTabs::xmlToWysiwyg(const QString &xml) const
                  "<div style=\"text-align: center; margin: 12px 0;\">"
                  "<img src=\"\\1\" style=\"max-width: 100%; max-height: 400px;\"/></div>");
 
-    html.replace(QRegularExpression("<h1\\s*/>"), "<h1 style=\"font-size: 24px; margin: 20px 0 12px 0;\">");
-    html.replace(QRegularExpression("<h2\\s*/>"), "<h2 style=\"font-size: 20px; margin: 16px 0 10px 0;\">");
-    html.replace(QRegularExpression("<h3\\s*/>"), "<h3 style=\"font-size: 16px; margin: 12px 0 8px 0;\">");
+    html.replace(QRegularExpression("<h1\\s*/>"),
+                 QString("<h1 style=\"font-size: %1px; margin: 20px 0 12px 0;\">").arg(h1Fs));
+    html.replace(QRegularExpression("<h2\\s*/>"),
+                 QString("<h2 style=\"font-size: %1px; margin: 16px 0 10px 0;\">").arg(h2Fs));
+    html.replace(QRegularExpression("<h3\\s*/>"),
+                 QString("<h3 style=\"font-size: %1px; margin: 12px 0 8px 0;\">").arg(h3Fs));
 
     html.replace(QRegularExpression("<blockquote([^>]*)>"),
                  "<blockquote\\1 style=\"margin: 12px 0; padding: 12px 20px; border-left: 4px solid #ccc; background: #fafafa;\">");
     html.replace(QRegularExpression("<pre([^>]*)>"),
-                 "<pre\\1 style=\"background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; font-family: Consolas, monospace; font-size: 13px;\">");
+                 QString("<pre\\1 style=\"background: #f5f5f5; padding: %1px; border-radius: 4px; overflow-x: auto; font-family: Consolas, monospace; font-size: %2px;\">")
+                     .arg(prePad).arg(preFs));
 
     html.replace("<ul>", "<ul style=\"margin: 8px 0; padding-left: 24px;\">");
     html.replace("<ol>", "<ol style=\"margin: 8px 0; padding-left: 24px;\">");

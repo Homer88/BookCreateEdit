@@ -66,6 +66,7 @@ XmlEditor::XmlEditor(QWidget *parent)
     , m_highlighter(nullptr)
     , m_lineNumberArea(nullptr)
     , m_matchedBracketPos(-1)
+    , m_scale(1.0)
 {
     setupHighlighter();
 
@@ -115,6 +116,23 @@ QString XmlEditor::xmlContent() const
 void XmlEditor::setReadOnly(bool readOnly)
 {
     QPlainTextEdit::setReadOnly(readOnly);
+}
+
+void XmlEditor::applyScale(int percent)
+{
+    m_scale = percent / 100.0;
+    int fs = qMax(6, qRound(12 * m_scale));
+    int pad = qMax(2, qRound(4 * m_scale));
+    setStyleSheet(QString(R"(
+        QPlainTextEdit {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            font-family: "Consolas", "Courier New", monospace;
+            font-size: %1px;
+            border: none;
+            padding: %2px;
+        }
+    )").arg(fs).arg(pad));
 }
 
 int XmlEditor::lineNumberAreaWidth()

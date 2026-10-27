@@ -1,4 +1,4 @@
-﻿#ifndef MdFORMAT_H
+#ifndef MdFORMAT_H
 #define MdFORMAT_H
 
 #include <QObject>
@@ -8,7 +8,7 @@ class MdPlugin : public QObject, public IBookFormat
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.bookcreateedit.format/1.0" FILE "md.json")
-    Q_INTERFACES(IBookFormat)
+    Q_INTERFACES(IBookFormat IBookPlugin)
 
 public:
     explicit MdPlugin(QObject *parent = nullptr);

@@ -48,6 +48,7 @@ void SettingsDialog::setupUI()
     m_tabWidget->addTab(createAppearancePage(), "Внешний вид");
     m_tabWidget->addTab(createDictionaryPage(), "Словари");
     m_tabWidget->addTab(createAutosavePage(), "Автосохранение");
+    m_tabWidget->addTab(createGitPage(), "Git");
     mainLayout->addWidget(m_tabWidget, 1);
 
     QHBoxLayout *btnLayout = new QHBoxLayout();
@@ -140,6 +141,12 @@ void SettingsDialog::loadSettings()
     m_chkAutoClean->setChecked(s.autoCleanHistory());
     m_edtBackupPath->setText(s.backupPath());
     m_chkCompress->setChecked(s.compressBackups());
+
+    // Git
+    m_edtGitLogin->setText(s.value("git/login", "").toString());
+    m_edtGitPassword->setText(s.value("git/password", "").toString());
+    m_edtGitApiKey->setText(s.value("git/apiKey", "").toString());
+    m_edtGitRemoteUrl->setText(s.value("git/remoteUrl", "").toString());
 }
 
 // ===================== Save =====================
@@ -210,6 +217,12 @@ void SettingsDialog::saveSettings()
     s.setAutoCleanHistory(m_chkAutoClean->isChecked());
     s.setBackupPath(m_edtBackupPath->text());
     s.setCompressBackups(m_chkCompress->isChecked());
+
+    // Git
+    s.setValue("git/login", m_edtGitLogin->text().trimmed());
+    s.setValue("git/password", m_edtGitPassword->text().trimmed());
+    s.setValue("git/apiKey", m_edtGitApiKey->text().trimmed());
+    s.setValue("git/remoteUrl", m_edtGitRemoteUrl->text().trimmed());
 
     s.sync();
 }
@@ -627,6 +640,50 @@ QWidget *SettingsDialog::createAutosavePage()
             m_edtBackupPath->setText(dir);
     });
 
+    return page;
+}
+
+// ===================== 2.8 Git =====================
+QWidget *SettingsDialog::createGitPage()
+{
+    QWidget *page = new QWidget(this);
+    QVBoxLayout *layout = new QVBoxLayout(page);
+
+    QGroupBox *grpAuth = new QGroupBox("Аутентификация GitHub", page);
+    QFormLayout *authForm = new QFormLayout(grpAuth);
+
+    m_edtGitLogin = new QLineEdit(grpAuth);
+    m_edtGitLogin->setPlaceholderText("username");
+    authForm->addRow("Логин:", m_edtGitLogin);
+
+    m_edtGitPassword = new QLineEdit(grpAuth);
+    m_edtGitPassword->setEchoMode(QLineEdit::Password);
+    m_edtGitPassword->setPlaceholderText("ghp_... (Personal Access Token)");
+    authForm->addRow("Токен (PAT):", m_edtGitPassword);
+
+    m_edtGitApiKey = new QLineEdit(grpAuth);
+    m_edtGitApiKey->setPlaceholderText("Необязательно");
+    authForm->addRow("API ключ:", m_edtGitApiKey);
+
+    layout->addWidget(grpAuth);
+
+    QGroupBox *grpRemote = new QGroupBox("Удалённый репозиторий", page);
+    QFormLayout *remoteForm = new QFormLayout(grpRemote);
+
+    m_edtGitRemoteUrl = new QLineEdit(grpRemote);
+    m_edtGitRemoteUrl->setPlaceholderText("https://github.com/user/repo.git");
+    remoteForm->addRow("URL:", m_edtGitRemoteUrl);
+
+    layout->addWidget(grpRemote);
+
+    QLabel *hint = new QLabel(
+        "Для публикации на GitHub создайте Personal Access Token\n"
+        "в настройках GitHub → Developer Settings → Tokens.\n"
+        "Токен нужен для доступа к репозиторию (repo scope).", page);
+    hint->setStyleSheet("color: gray; font-size: 10px;");
+    layout->addWidget(hint);
+
+    layout->addStretch();
     return page;
 }
 

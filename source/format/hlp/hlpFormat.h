@@ -1,4 +1,4 @@
-﻿#ifndef HlpFORMAT_H
+#ifndef HlpFORMAT_H
 #define HlpFORMAT_H
 
 #include <QObject>
@@ -8,7 +8,7 @@ class HlpPlugin : public QObject, public IBookFormat
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.bookcreateedit.format/1.0" FILE "hlp.json")
-    Q_INTERFACES(IBookFormat)
+    Q_INTERFACES(IBookFormat IBookPlugin)
 
 public:
     explicit HlpPlugin(QObject *parent = nullptr);

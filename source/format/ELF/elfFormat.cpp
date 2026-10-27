@@ -111,7 +111,7 @@ QString ElfPlugin::fileExtension() const { return "elf"; }
 QStringList ElfPlugin::supportedExtensions() const { return {"elf"}; }
 QStringList ElfPlugin::mimeTypes() const { return {"application/x-elf"}; }
 
-bool ElfPlugin::canRead() const { return true; }
+bool ElfPlugin::canRead() const { return false; } // ELF — только запись (dosc.md)
 bool ElfPlugin::canWrite() const { return true; }
 
 bool ElfPlugin::read(const QString &filePath, BookDocument *doc)

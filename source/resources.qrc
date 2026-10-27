@@ -1,33 +1,33 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
     <qresource prefix="/icons">
-        <file>icons/new.svg</file>
-        <file>icons/open.svg</file>
-        <file>icons/save.svg</file>
-        <file>icons/saveas.svg</file>
-        <file>icons/undo.svg</file>
-        <file>icons/redo.svg</file>
-        <file>icons/cut.svg</file>
-        <file>icons/copy.svg</file>
-        <file>icons/paste.svg</file>
-        <file>icons/bold.svg</file>
-        <file>icons/italic.svg</file>
-        <file>icons/underline.svg</file>
-        <file>icons/alignleft.svg</file>
-        <file>icons/aligncenter.svg</file>
-        <file>icons/alignright.svg</file>
-        <file>icons/page.svg</file>
-        <file>icons/image.svg</file>
-        <file>icons/table.svg</file>
-        <file>icons/link.svg</file>
-        <file>icons/find.svg</file>
-        <file>icons/settings.svg</file>
-        <file>icons/import.svg</file>
-        <file>icons/publish.svg</file>
-        <file>icons/restore.svg</file>
-        <file>icons/close.svg</file>
-        <file>icons/contents.svg</file>
-        <file>icons/files.svg</file>
-        <file>icons/preview.svg</file>
+        <file alias="new.svg">icons/new.svg</file>
+        <file alias="open.svg">icons/open.svg</file>
+        <file alias="save.svg">icons/save.svg</file>
+        <file alias="saveas.svg">icons/saveas.svg</file>
+        <file alias="undo.svg">icons/undo.svg</file>
+        <file alias="redo.svg">icons/redo.svg</file>
+        <file alias="cut.svg">icons/cut.svg</file>
+        <file alias="copy.svg">icons/copy.svg</file>
+        <file alias="paste.svg">icons/paste.svg</file>
+        <file alias="bold.svg">icons/bold.svg</file>
+        <file alias="italic.svg">icons/italic.svg</file>
+        <file alias="underline.svg">icons/underline.svg</file>
+        <file alias="alignleft.svg">icons/alignleft.svg</file>
+        <file alias="aligncenter.svg">icons/aligncenter.svg</file>
+        <file alias="alignright.svg">icons/alignright.svg</file>
+        <file alias="page.svg">icons/page.svg</file>
+        <file alias="image.svg">icons/image.svg</file>
+        <file alias="table.svg">icons/table.svg</file>
+        <file alias="link.svg">icons/link.svg</file>
+        <file alias="find.svg">icons/find.svg</file>
+        <file alias="settings.svg">icons/settings.svg</file>
+        <file alias="import.svg">icons/import.svg</file>
+        <file alias="publish.svg">icons/publish.svg</file>
+        <file alias="restore.svg">icons/restore.svg</file>
+        <file alias="close.svg">icons/close.svg</file>
+        <file alias="contents.svg">icons/contents.svg</file>
+        <file alias="files.svg">icons/files.svg</file>
+        <file alias="preview.svg">icons/preview.svg</file>
     </qresource>
 </RCC>

@@ -74,6 +74,14 @@ void PluginManager::loadPlugin(const QString &filePath)
     QPluginLoader *loader = new QPluginLoader(filePath, this);
 
     QJsonObject metaData = loader->metaData();
+
+    // Обычная DLL без метаданных Qt-плагина (например, git.dll) —
+    // пропускаем молча, это не ошибка.
+    if (metaData.value("IID").toString().isEmpty()) {
+        delete loader;
+        return;
+    }
+
     QString pluginId = metaData.value("MetaData").toObject().value("id").toString();
     if (pluginId.isEmpty())
         pluginId = QFileInfo(filePath).baseName();

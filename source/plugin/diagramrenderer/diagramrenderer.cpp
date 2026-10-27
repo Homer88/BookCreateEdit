@@ -1,6 +1,13 @@
 ﻿#include "diagramrenderer.h"
 #include <QDebug>
 
+/**
+ * @brief Конструктор плагина отрисовки диаграмм.
+ * @param parent Родительский объект Qt.
+ *
+ * Инициализирует контекст нулевым указателем и сбрасывает флаг
+ * инициализации — плагин считается неактивным до вызова initialize().
+ */
 DiagramrendererPlugin::DiagramrendererPlugin(QObject *parent)
     : QObject(parent)
     , m_context(nullptr)
@@ -8,22 +15,46 @@ DiagramrendererPlugin::DiagramrendererPlugin(QObject *parent)
 {
 }
 
+/**
+ * @brief Деструктор плагина.
+ *
+ * Вызывает shutdown(), чтобы освободить ресурсы и снять регистрацию
+ * в системе, даже если shutdown() не был вызван явно.
+ */
 DiagramrendererPlugin::~DiagramrendererPlugin()
 {
     shutdown();
 }
 
+/** @brief Возвращает имя плагина. */
 QString DiagramrendererPlugin::name() const { return "Diagramrenderer"; }
+
+/** @brief Возвращает описание назначения плагина. */
 QString DiagramrendererPlugin::description() const { return "Plugin Diagramrenderer"; }
+
+/** @brief Возвращает версию плагина в формате «X.Y.Z». */
 QString DiagramrendererPlugin::version() const { return "1.0.0"; }
+
+/** @brief Возвращает имя автора плагина. */
 QString DiagramrendererPlugin::author() const { return "Your Name"; }
+
+/** @brief Возвращает список зависимостей (у данного плагина их нет). */
 QStringList DiagramrendererPlugin::dependencies() const { return {}; }
 
+/**
+ * @brief Инициализирует плагин контекстом приложения.
+ * @param ctx Указатель на контекст книги/приложения.
+ *
+ * Сохраняет контекст, помечает плагин инициализированным и записывает
+ * сообщение в системный журнал через BookContext::log().
+ */
 void DiagramrendererPlugin::initialize(BookContext *ctx)
 {
     m_context = ctx;
     m_initialized = true;
 
+    // Журналируем только при наличии валидного контекста,
+    // чтобы избежать разыменования нулевого указателя.
     if (m_context)
         m_context->log("Diagramrenderer РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ");
 
@@ -34,6 +65,12 @@ void DiagramrendererPlugin::initialize(BookContext *ctx)
     // - РџРѕРґРєР»СЋС‡РµРЅРёРµ СЃРёРіРЅР°Р»РѕРІ
 }
 
+/**
+ * @brief Завершает работу плагина и освобождает ресурсы.
+ *
+ * Сбрасывает флаг инициализации и обнуляет указатель на контекст,
+ * чтобы после завершения работы плагин не использовал устаревший контекст.
+ */
 void DiagramrendererPlugin::shutdown()
 {
     // TODO: Р·РґРµСЃСЊ РѕС‡РёСЃС‚РєР° СЂРµСЃСѓСЂСЃРѕРІ
@@ -42,5 +79,5 @@ void DiagramrendererPlugin::shutdown()
     m_context = nullptr;
 }
 
+/** @brief Возвращает true, если плагин успешно инициализирован. */
 bool DiagramrendererPlugin::isInitialized() const { return m_initialized; }
-

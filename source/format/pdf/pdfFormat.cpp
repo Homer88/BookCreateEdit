@@ -45,7 +45,7 @@ QString PdfPlugin::fileExtension() const { return "pdf"; }
 QStringList PdfPlugin::supportedExtensions() const { return {"pdf"}; }
 QStringList PdfPlugin::mimeTypes() const { return {"application/x-pdf"}; }
 
-bool PdfPlugin::canRead() const { return true; }
+bool PdfPlugin::canRead() const { return false; } // PDF — только запись (dosc.md)
 bool PdfPlugin::canWrite() const { return true; }
 
 bool PdfPlugin::read(const QString &filePath, BookDocument *doc)

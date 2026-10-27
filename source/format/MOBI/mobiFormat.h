@@ -1,4 +1,4 @@
-﻿#ifndef MobiFORMAT_H
+#ifndef MobiFORMAT_H
 #define MobiFORMAT_H
 
 #include <QObject>
@@ -8,7 +8,7 @@ class MobiPlugin : public QObject, public IBookFormat
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.bookcreateedit.format/1.0" FILE "mobi.json")
-    Q_INTERFACES(IBookFormat)
+    Q_INTERFACES(IBookFormat IBookPlugin)
 
 public:
     explicit MobiPlugin(QObject *parent = nullptr);

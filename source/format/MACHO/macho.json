@@ -1,0 +1,7 @@
+{
+    "Keys": ["com.bookcreateedit.format.macho"],
+    "MetaData": {
+        "name": "Mach-O",
+        "description": "Self-contained Mach-O executable book format"
+    }
+}

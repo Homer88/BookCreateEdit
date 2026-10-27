@@ -26,6 +26,16 @@ void SettingsManager::sync()
     m_settings.sync();
 }
 
+QVariant SettingsManager::value(const QString &key, const QVariant &defaultValue) const
+{
+    return m_settings.value(key, defaultValue);
+}
+
+void SettingsManager::setValue(const QString &key, const QVariant &value)
+{
+    m_settings.setValue(key, value);
+}
+
 // ===================== Font =====================
 QString SettingsManager::editorFontFamily() const
 {

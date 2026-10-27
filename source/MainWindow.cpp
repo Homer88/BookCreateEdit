@@ -10,6 +10,9 @@
 #include "ImportDialog.h"
 #include "PluginManager.h"
 #include "ThemeManager.h"
+#include "ProjectManager.h"
+#include "NewProjectDialog.h"
+#include "interfaces/IBookFormat.h"
 
 #include <QSplitter>
 #include <QTextEdit>
@@ -27,6 +30,7 @@
 #include <QDebug>
 #include <QInputDialog>
 #include <QFileInfo>
+#include <QDir>
 
 static QIcon icon(const QString &name)
 {
@@ -40,6 +44,7 @@ MainWindow::MainWindow(QWidget *parent)
     QApplication::setFont(m_baseFont);
 
     m_document = new BookDocument(this);
+    m_project = new ProjectManager(this);
 
     setupUI();
     setupMenuBar();
@@ -55,6 +60,54 @@ MainWindow::MainWindow(QWidget *parent)
     m_leftPanel->setDocument(m_document);
 
     connect(m_leftPanel, &LeftPanel::pageSelected, m_editor, &EditorTabs::setCurrentPage);
+
+    // Вставка страниц из контекстного меню дерева оглавления:
+    // сначала сбрасываем правки активного редактора (индексы ещё не сдвинуты),
+    // затем меняем документ и перестраиваем вкладки редактора
+    connect(m_leftPanel, &LeftPanel::pageInsertRequested, this,
+            [this](int pageIndex, int mode) {
+        if (!m_document)
+            return;
+        m_editor->flushCurrentPage();
+
+        int at = -1;
+        QString parentId;
+        switch (mode) {
+        case 0:
+            // До выбранной страницы (перед всем её поддеревом)
+            at = pageIndex;
+            break;
+        case 1:
+            // После выбранной — после последнего потомка её поддерева
+            at = m_document->lastDescendantIndex(pageIndex) + 1;
+            break;
+        case 2:
+            // Дочерняя страница — в конец поддерева родителя
+            parentId = m_document->pageId(pageIndex);
+            at = m_document->lastDescendantIndex(pageIndex) + 1;
+            break;
+        default:
+            at = -1;                            // в конец книги
+            break;
+        }
+
+        const int newIdx = m_document->insertPage(at, parentId);
+        m_editor->reloadFromDocument(newIdx);
+        m_leftPanel->refreshContents(newIdx);
+    });
+
+    // Удаление страницы из дерева: правки сохраняем до удаления,
+    // затем пересобираем редактор и выделяем соседнюю страницу
+    connect(m_leftPanel, &LeftPanel::pageDeleteRequested, this,
+            [this](int pageIndex) {
+        if (!m_document || m_document->pageCount() <= 1)
+            return;
+        m_editor->flushCurrentPage();
+        m_document->removePage(pageIndex);
+        const int sel = qMin(pageIndex, m_document->pageCount() - 1);
+        m_editor->reloadFromDocument(sel);
+        m_leftPanel->refreshContents(sel);
+    });
 
     ThemeManager::instance().setTheme(ThemeManager::Light);
 }
@@ -82,59 +135,107 @@ void MainWindow::setupUI()
     tabFile->addGroup("Управление", {btnClose, btnSettings});
 
     connect(btnNew, &QToolButton::clicked, this, [this]() {
-        if (m_document->isModified()) {
-            auto btn = QMessageBox::question(this, "Новый проект",
-                "Сохранить изменения перед созданием нового?",
-                QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
-            if (btn == QMessageBox::Cancel) return;
-            if (btn == QMessageBox::Yes && !m_document->filePath().isEmpty())
-                m_document->save();
-        }
-        m_document->newDocument();
-        m_leftPanel->refreshContents();
-        setWindowTitle("BookCreateEdit — Новый проект");
-        statusBar()->showMessage("Создан новый проект");
+        createNewProject();
     });
     connect(btnOpen, &QToolButton::clicked, this, [this]() {
         QString filePath = QFileDialog::getOpenFileName(this, "Открыть проект", QString(),
-            "Проекты BookCreateEdit (*.bce);;Все файлы (*)");
-        if (!filePath.isEmpty()) {
+            "Проекты BookCreateEdit (*.bceproj);;" + buildOpenFilter());
+        if (filePath.isEmpty()) return;
+
+        QString ext = QFileInfo(filePath).suffix().toLower();
+        if (ext == "bceproj") {
+            // Полноценный проект
+            if (!openProject(filePath))
+                QMessageBox::warning(this, "Ошибка",
+                    "Не удалось открыть проект:\n" + filePath);
+            return;
+        }
+
+        if (ext == "bce") {
+            // Одиночный документ
+            m_editor->flushCurrentPage();
             if (m_document->load(filePath)) {
-                m_leftPanel->refreshContents();
+                reloadEditor(0);
                 setWindowTitle("BookCreateEdit — " + QFileInfo(filePath).fileName());
-                statusBar()->showMessage("Проект открыт: " + filePath);
+                updateFormatIndicator();
             } else {
                 QMessageBox::warning(this, "Ошибка", "Не удалось открыть файл:\n" + filePath);
             }
+            return;
+        }
+
+        // Любой другой формат — импортируем через плагин
+        IBookFormat *fmt = detectFormatByExtension(filePath);
+        if (fmt && fmt->canRead()) {
+            m_editor->flushCurrentPage();
+            m_document->newDocument();
+            if (fmt->read(filePath, m_document)) {
+                QString bcePath = QFileInfo(filePath).absolutePath() + "/"
+                    + QFileInfo(filePath).completeBaseName() + ".bce";
+                m_document->saveAs(bcePath);
+                reloadEditor(0);
+                setWindowTitle("BookCreateEdit — " + QFileInfo(bcePath).fileName());
+                updateFormatIndicator();
+                statusBar()->showMessage(
+                    QString("Импортировано из %1: %2 → %3")
+                        .arg(fmt->formatName(), QFileInfo(filePath).fileName(),
+                             QFileInfo(bcePath).fileName()));
+            } else {
+                // Документ уже заменён пустым — приводим редактор в соответствие
+                reloadEditor(0);
+                QMessageBox::warning(this, "Ошибка",
+                    QString("Не удалось импортировать файл %1 через плагин %2.")
+                        .arg(filePath, fmt->formatName()));
+            }
+        } else {
+            QMessageBox::warning(this, "Ошибка",
+                QString("Формат \".%1\" не поддерживается для чтения.").arg(ext));
         }
     });
     connect(btnSave, &QToolButton::clicked, this, [this]() {
-        if (m_document->filePath().isEmpty()) {
-            QString filePath = QFileDialog::getSaveFileName(this, "Сохранить проект", QString(),
-                "Проекты BookCreateEdit (*.bce)");
-            if (!filePath.isEmpty()) {
-                if (m_document->saveAs(filePath)) {
-                    setWindowTitle("BookCreateEdit — " + QFileInfo(filePath).fileName());
-                    statusBar()->showMessage("Проект сохранён");
-                }
-            }
-        } else {
-            if (m_document->save())
-                statusBar()->showMessage("Проект сохранён");
-        }
+        saveProject();
+        updateFormatIndicator();
     });
     connect(btnSaveAs, &QToolButton::clicked, this, [this]() {
         QString filePath = QFileDialog::getSaveFileName(this, "Сохранить как", QString(),
-            "Проекты BookCreateEdit (*.bce)");
+            buildSaveFilter());
         if (!filePath.isEmpty()) {
-            if (m_document->saveAs(filePath)) {
-                setWindowTitle("BookCreateEdit — " + QFileInfo(filePath).fileName());
-                statusBar()->showMessage("Проект сохранён как: " + filePath);
+            QString ext = QFileInfo(filePath).suffix().toLower();
+
+            if (ext == "bce" || ext.isEmpty()) {
+                // Сохранение в нативном BCE формате
+                if (!filePath.endsWith(".bce")) filePath += ".bce";
+                if (m_document->saveAs(filePath)) {
+                    setWindowTitle("BookCreateEdit — " + QFileInfo(filePath).fileName());
+                    updateFormatIndicator();
+                    statusBar()->showMessage("Проект сохранён как: " + filePath);
+                }
+            } else {
+                // Экспорт в другой формат через плагин
+                IBookFormat *fmt = detectFormatByExtension(filePath);
+                if (fmt && fmt->canWrite()) {
+                    if (fmt->write(m_document, filePath)) {
+                        // Сохраняем .bce копию рядом
+                        QString bcePath = QFileInfo(filePath).absolutePath() + "/"
+                            + QFileInfo(filePath).completeBaseName() + ".bce";
+                        m_document->saveAs(bcePath);
+                        setWindowTitle("BookCreateEdit — " + QFileInfo(bcePath).fileName());
+                        updateFormatIndicator();
+                        statusBar()->showMessage(
+                            QString("Экспортировано в %1: %2").arg(fmt->formatName(), filePath));
+                    } else {
+                        QMessageBox::warning(this, "Ошибка",
+                            "Не удалось экспортировать в " + fmt->formatName());
+                    }
+                } else {
+                    QMessageBox::warning(this, "Ошибка",
+                        QString("Формат \".%1\" не поддерживается для записи.").arg(ext));
+                }
             }
         }
     });
     connect(btnPublish, &QToolButton::clicked, this, [this]() {
-        PublishDialog dlg(m_document, this);
+        PublishDialog dlg(m_document, m_project, this);
         dlg.exec();
     });
     connect(btnRestore, &QToolButton::clicked, this, [this]() {
@@ -143,8 +244,12 @@ void MainWindow::setupUI()
     });
     connect(btnImport, &QToolButton::clicked, this, [this]() {
         ImportDialog dlg(m_document, this);
+        dlg.setProjectDir(hasProject() ? m_project->projectDir() : QString());
         if (dlg.exec() == QDialog::Accepted) {
-            m_leftPanel->refreshContents();
+            // Импорт добавил страницы в документ — пересобираем редактор
+            const int cur = qBound(0, m_editor->currentPage(),
+                                   m_document->pageCount() - 1);
+            reloadEditor(cur);
         }
     });
     connect(btnClose, &QToolButton::clicked, this, [this]() {
@@ -155,12 +260,12 @@ void MainWindow::setupUI()
             if (!m_document->filePath().isEmpty())
                 m_document->save();
             m_document->newDocument();
-            m_leftPanel->refreshContents();
+            reloadEditor(0);
             setWindowTitle("BookCreateEdit");
             statusBar()->showMessage("Проект закрыт");
         } else if (btn == QMessageBox::No) {
             m_document->newDocument();
-            m_leftPanel->refreshContents();
+            reloadEditor(0);
             setWindowTitle("BookCreateEdit");
             statusBar()->showMessage("Проект закрыт без сохранения");
         }
@@ -355,68 +460,105 @@ void MainWindow::setupMenuBar()
     actExit->setShortcut(QKeySequence::Quit);
 
     connect(actNew, &QAction::triggered, this, [this]() {
-        if (m_document->isModified()) {
-            auto btn = QMessageBox::question(this, "Новый проект",
-                "Сохранить изменения перед созданием нового?",
-                QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
-            if (btn == QMessageBox::Cancel) return;
-            if (btn == QMessageBox::Yes && !m_document->filePath().isEmpty())
-                m_document->save();
-        }
-        m_document->newDocument();
-        m_leftPanel->refreshContents();
-        setWindowTitle("BookCreateEdit — Новый проект");
-        statusBar()->showMessage("Создан новый проект");
+        createNewProject();
     });
     connect(actOpen, &QAction::triggered, this, [this]() {
         QString filePath = QFileDialog::getOpenFileName(this, "Открыть проект", QString(),
-            "Проекты BookCreateEdit (*.bce);;Все файлы (*)");
-        if (!filePath.isEmpty()) {
-            if (m_document->load(filePath)) {
-                m_leftPanel->refreshContents();
-                setWindowTitle("BookCreateEdit — " + QFileInfo(filePath).fileName());
-                statusBar()->showMessage("Проект открыт: " + filePath);
+            "Проекты BookCreateEdit (*.bceproj);;" + buildOpenFilter());
+        if (filePath.isEmpty()) return;
+
+        QString ext = QFileInfo(filePath).suffix().toLower();
+        if (ext == "bceproj") {
+            if (!openProject(filePath))
+                QMessageBox::warning(this, "Ошибка",
+                    "Не удалось открыть проект:\n" + filePath);
+            return;
+        }
+        if (ext == "bce") {
+            if (!openProject(filePath))
+                QMessageBox::warning(this, "Ошибка",
+                    "Не удалось открыть файл:\n" + filePath);
+            return;
+        }
+
+        IBookFormat *fmt = detectFormatByExtension(filePath);
+        if (fmt && fmt->canRead()) {
+            m_editor->flushCurrentPage();
+            m_document->newDocument();
+            if (fmt->read(filePath, m_document)) {
+                QString bcePath = QFileInfo(filePath).absolutePath() + "/"
+                    + QFileInfo(filePath).completeBaseName() + ".bce";
+                m_document->saveAs(bcePath);
+                reloadEditor(0);
+                setWindowTitle("BookCreateEdit — " + QFileInfo(bcePath).fileName());
+                updateFormatIndicator();
+                statusBar()->showMessage(
+                    QString("Импортировано из %1: %2")
+                        .arg(fmt->formatName(), QFileInfo(filePath).fileName()));
             } else {
-                QMessageBox::warning(this, "Ошибка", "Не удалось открыть файл:\n" + filePath);
+                // Документ уже заменён пустым — приводим редактор в соответствие
+                reloadEditor(0);
+                QMessageBox::warning(this, "Ошибка",
+                    QString("Не удалось импортировать файл %1 через плагин %2.")
+                        .arg(filePath, fmt->formatName()));
             }
+        } else {
+            QMessageBox::warning(this, "Ошибка",
+                QString("Формат \".%1\" не поддерживается для чтения.").arg(ext));
         }
     });
     connect(actSave, &QAction::triggered, this, [this]() {
-        if (m_document->filePath().isEmpty()) {
-            QString filePath = QFileDialog::getSaveFileName(this, "Сохранить проект", QString(),
-                "Проекты BookCreateEdit (*.bce)");
-            if (!filePath.isEmpty()) {
-                if (m_document->saveAs(filePath)) {
-                    setWindowTitle("BookCreateEdit — " + QFileInfo(filePath).fileName());
-                    statusBar()->showMessage("Проект сохранён");
-                }
-            }
-        } else {
-            if (m_document->save())
-                statusBar()->showMessage("Проект сохранён");
-        }
+        saveProject();
+        updateFormatIndicator();
     });
     connect(actSaveAs, &QAction::triggered, this, [this]() {
         QString filePath = QFileDialog::getSaveFileName(this, "Сохранить как", QString(),
-            "Проекты BookCreateEdit (*.bce)");
+            buildSaveFilter());
         if (!filePath.isEmpty()) {
-            if (m_document->saveAs(filePath)) {
-                setWindowTitle("BookCreateEdit — " + QFileInfo(filePath).fileName());
-                statusBar()->showMessage("Проект сохранён как: " + filePath);
+            QString ext = QFileInfo(filePath).suffix().toLower();
+            if (ext == "bce" || ext.isEmpty()) {
+                if (!filePath.endsWith(".bce")) filePath += ".bce";
+                if (m_document->saveAs(filePath)) {
+                    setWindowTitle("BookCreateEdit — " + QFileInfo(filePath).fileName());
+                    updateFormatIndicator();
+                    statusBar()->showMessage("Проект сохранён как: " + filePath);
+                }
+            } else {
+                IBookFormat *fmt = detectFormatByExtension(filePath);
+                if (fmt && fmt->canWrite()) {
+                    if (fmt->write(m_document, filePath)) {
+                        QString bcePath = QFileInfo(filePath).absolutePath() + "/"
+                            + QFileInfo(filePath).completeBaseName() + ".bce";
+                        m_document->saveAs(bcePath);
+                        setWindowTitle("BookCreateEdit — " + QFileInfo(bcePath).fileName());
+                        updateFormatIndicator();
+                        statusBar()->showMessage(
+                            QString("Экспортировано в %1: %2").arg(fmt->formatName(), filePath));
+                    }
+                }
             }
         }
     });
     connect(actImportFile, &QAction::triggered, this, [this]() {
         ImportDialog dlg(m_document, this);
-        if (dlg.exec() == QDialog::Accepted)
-            m_leftPanel->refreshContents();
+        dlg.setProjectDir(hasProject() ? m_project->projectDir() : QString());
+        if (dlg.exec() == QDialog::Accepted) {
+            // Импорт добавил страницы в документ — пересобираем редактор
+            const int cur = qBound(0, m_editor->currentPage(),
+                                   m_document->pageCount() - 1);
+            reloadEditor(cur);
+        }
     });
     connect(actImportProject, &QAction::triggered, this, [this]() {
-        QFileDialog::getOpenFileName(this, "Импорт проекта", QString(),
+        QString projPath = QFileDialog::getOpenFileName(this, "Импорт проекта", QString(),
             "Файлы проектов (*.bceproj);;Все файлы (*)");
+        if (projPath.isEmpty()) return;
+        if (!openProject(projPath))
+            QMessageBox::warning(this, "Ошибка",
+                "Не удалось открыть проект:\n" + projPath);
     });
     connect(actPublish, &QAction::triggered, this, [this]() {
-        PublishDialog dlg(m_document, this);
+        PublishDialog dlg(m_document, m_project, this);
         dlg.exec();
     });
     connect(actRestore, &QAction::triggered, this, [this]() {
@@ -430,11 +572,11 @@ void MainWindow::setupMenuBar()
         if (btn == QMessageBox::Yes) {
             if (!m_document->filePath().isEmpty()) m_document->save();
             m_document->newDocument();
-            m_leftPanel->refreshContents();
+            reloadEditor(0);
             setWindowTitle("BookCreateEdit");
         } else if (btn == QMessageBox::No) {
             m_document->newDocument();
-            m_leftPanel->refreshContents();
+            reloadEditor(0);
             setWindowTitle("BookCreateEdit");
         }
     });
@@ -567,6 +709,9 @@ void MainWindow::applyScale(int percent)
     m_leftPanel->setMinimumWidth(qRound(180 * k));
     m_leftPanel->setMaximumWidth(qRound(600 * k));
     m_splitter->setSizes({sidebarW, width() - sidebarW});
+
+    if (m_editor)
+        m_editor->applyScale(percent);
 }
 
 void MainWindow::applySettings()
@@ -577,8 +722,9 @@ void MainWindow::applySettings()
     applyScale(scale);
 
     int sidebarW = s.sidebarWidth();
-    m_leftPanel->setMinimumWidth(180);
-    m_leftPanel->setMaximumWidth(600);
+    qreal k = scale / 100.0;
+    m_leftPanel->setMinimumWidth(qRound(180 * k));
+    m_leftPanel->setMaximumWidth(qRound(600 * k));
     m_splitter->setSizes({sidebarW, width() - sidebarW});
 
     ThemeManager::instance().setTheme(ThemeManager::Light);
@@ -598,4 +744,278 @@ void MainWindow::log(const QString &message)
     qDebug() << "[BookCreateEdit]" << message;
     if (statusBar())
         statusBar()->showMessage(message, 5000);
+}
+
+// --- Динамическая смена расширения ---
+
+QString MainWindow::buildOpenFilter() const
+{
+    // Группируем расширения по плагинам для красивого фильтра
+    QStringList filters;
+    filters << "Проекты BookCreateEdit (*.bce)";
+
+    QStringList formatNames = PluginManager::instance().availableFormats();
+    for (const QString &name : formatNames) {
+        IBookFormat *fmt = PluginManager::instance().format(name);
+        if (fmt && fmt->canRead()) {
+            QStringList exts = fmt->supportedExtensions();
+            QString pattern;
+            for (const QString &ext : exts) {
+                if (!pattern.isEmpty()) pattern += " ";
+                pattern += "*." + ext;
+            }
+            filters << QString("%1 (%2)").arg(fmt->formatName(), pattern);
+        }
+    }
+
+    filters << "Все файлы (*)";
+    return filters.join(";;");
+}
+
+QString MainWindow::buildSaveFilter() const
+{
+    QStringList filters;
+    filters << "Проекты BookCreateEdit (*.bce)";
+
+    QStringList formatNames = PluginManager::instance().availableFormats();
+    for (const QString &name : formatNames) {
+        IBookFormat *fmt = PluginManager::instance().format(name);
+        if (fmt && fmt->canWrite()) {
+            QStringList exts = fmt->supportedExtensions();
+            QString pattern;
+            for (const QString &ext : exts) {
+                if (!pattern.isEmpty()) pattern += " ";
+                pattern += "*." + ext;
+            }
+            filters << QString("%1 (%2)").arg(fmt->formatName(), pattern);
+        }
+    }
+
+    filters << "Все файлы (*)";
+    return filters.join(";;");
+}
+
+IBookFormat *MainWindow::detectFormatByExtension(const QString &filePath) const
+{
+    QString ext = QFileInfo(filePath).suffix().toLower();
+    if (ext.isEmpty()) return nullptr;
+    return PluginManager::instance().formatByExtension(ext);
+}
+
+void MainWindow::updateFormatIndicator()
+{
+    if (m_document->filePath().isEmpty()) {
+        m_currentFormatId.clear();
+        statusBar()->showMessage("Готово");
+        return;
+    }
+
+    IBookFormat *fmt = detectFormatByExtension(m_document->filePath());
+    if (fmt) {
+        m_currentFormatId = fmt->formatName();
+        statusBar()->showMessage(
+            QString("Формат: %1 | %2")
+                .arg(fmt->formatName(), m_document->filePath()));
+    } else {
+        m_currentFormatId.clear();
+        statusBar()->showMessage(m_document->filePath());
+    }
+}
+
+// --- Управление проектом (.bceproj) ---
+
+void MainWindow::createNewProject()
+{
+    // 0. Предлагаем сохранить текущую работу
+    if (m_document->isModified()) {
+        auto btn = QMessageBox::question(this, "Новый проект",
+            "Сохранить изменения перед созданием нового?",
+            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+        if (btn == QMessageBox::Cancel)
+            return;
+        if (btn == QMessageBox::Yes && !m_document->filePath().isEmpty())
+            m_document->save();
+    }
+
+    // 1. Диалог создания проекта
+    NewProjectDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    const QString root = dlg.projectRoot();
+    const QString name = dlg.projectName();
+    if (name.isEmpty() || root.isEmpty())
+        return;
+
+    // 2. Структура каталогов проекта (dosc.md): history, img, content, map
+    QDir().mkpath(root);
+    for (const QString &sub : QStringList{"history", "img", "content", "map"})
+        QDir(root).mkpath(sub);
+
+    // 3. Новый .bceproj + пустой документ (пустое оглавление — 1 страница)
+    m_project->newProject(name);
+    m_project->setBookTitle(name);
+    m_editor->flushCurrentPage();
+    m_document->newDocument();
+    // Редактор сразу приводим в соответствие новому документу
+    reloadEditor(0);
+
+    const QString bcePath = root + "/" + name + ".bce";
+    if (!m_document->saveAs(bcePath)) {
+        QMessageBox::warning(this, "Новый проект",
+            "Не удалось создать файл книги:\n" + bcePath);
+        return;
+    }
+
+    m_project->addDocument(QFileInfo(bcePath).fileName(), "BCE");
+    const QString projPath = root + "/" + name + ".bceproj";
+    if (!m_project->save(projPath)) {
+        QMessageBox::warning(this, "Новый проект",
+            "Не удалось создать файл проекта:\n" + projPath);
+        return;
+    }
+
+    // 4. Импорт выбранных файлов: раскладка по img/ и content/
+    int copied = 0;
+    for (const auto &pair : dlg.importPlan()) {
+        QFileInfo srcFi(pair.first);
+        if (!srcFi.exists())
+            continue;
+        QDir destDir(root + "/" + pair.second);
+
+        // Не перезаписываем существующие файлы
+        QString destName = srcFi.fileName();
+        int n = 2;
+        while (destDir.exists(destName)) {
+            destName = QString("%1_%2.%3")
+                .arg(srcFi.completeBaseName()).arg(n++).arg(srcFi.suffix());
+        }
+        if (QFile::copy(pair.first, destDir.filePath(destName)))
+            ++copied;
+    }
+
+    // 5. Обновление интерфейса
+    m_leftPanel->refreshContents();
+    setWindowTitle("BookCreateEdit — " + QFileInfo(projPath).fileName());
+    updateFormatIndicator();
+    statusBar()->showMessage(
+        QString("Проект создан: %1 (импортировано файлов: %2)")
+            .arg(root).arg(copied));
+}
+
+bool MainWindow::hasProject() const
+{
+    return m_project && !m_project->filePath().isEmpty();
+}
+
+/**
+ * @brief Пересобирает вкладки редактора и дерево оглавления.
+ * @param selectPage Индекс открываемой страницы (по умолчанию 0).
+ */
+void MainWindow::reloadEditor(int selectPage)
+{
+    m_editor->reloadFromDocument(selectPage);
+    m_leftPanel->refreshContents(selectPage);
+}
+
+void MainWindow::newProject(const QString &projectPath)
+{
+    m_editor->flushCurrentPage();
+    m_document->newDocument();
+    reloadEditor(0);
+
+    if (!projectPath.isEmpty()) {
+        QString name = QFileInfo(projectPath).completeBaseName();
+        m_project->newProject(name);
+        if (m_project->save(projectPath)) {
+            QString bceDir = QFileInfo(projectPath).absolutePath();
+            QString bcePath = bceDir + "/" + name + ".bce";
+            m_document->saveAs(bcePath);
+            m_project->addDocument(QFileInfo(bcePath).fileName(), "BCE");
+            m_project->save();
+        }
+    }
+
+    m_leftPanel->refreshContents();
+    setWindowTitle("BookCreateEdit — " +
+        (projectPath.isEmpty() ? QString("Новый проект")
+                               : QFileInfo(projectPath).fileName()));
+}
+
+bool MainWindow::openProject(const QString &filePath)
+{
+    // Правки текущего документа сохраняем до его замены
+    m_editor->flushCurrentPage();
+
+    QString ext = QFileInfo(filePath).suffix().toLower();
+
+    // .bceproj — загружаем проект, затем его основной документ
+    if (ext == "bceproj") {
+        if (!m_project->load(filePath))
+            return false;
+
+        QString mainDoc = m_project->mainDocumentPath();
+        if (!mainDoc.isEmpty()) {
+            // Путь к документу — относительно каталога проекта
+            QString absDoc = mainDoc;
+            if (QFileInfo(mainDoc).isRelative())
+                absDoc = m_project->projectDir() + "/" + mainDoc;
+
+            if (QFileInfo::exists(absDoc)) {
+                if (!m_document->load(absDoc))
+                    return false;
+                reloadEditor(0);
+            }
+        }
+
+        m_leftPanel->refreshContents();
+        setWindowTitle("BookCreateEdit — " + QFileInfo(filePath).fileName());
+        updateFormatIndicator();
+        return true;
+    }
+
+    // .bce — одиночный документ без проекта
+    if (!m_document->load(filePath))
+        return false;
+
+    reloadEditor(0);
+    setWindowTitle("BookCreateEdit — " + QFileInfo(filePath).fileName());
+    updateFormatIndicator();
+    return true;
+}
+
+void MainWindow::saveProject()
+{
+    // 1. Сохраняем документ (.bce)
+    if (m_document->filePath().isEmpty()) {
+        // Документ ещё не сохранён
+        QString docPath;
+        if (hasProject()) {
+            docPath = m_project->projectDir() + "/"
+                + m_project->projectName() + ".bce";
+        } else {
+            docPath = QFileDialog::getSaveFileName(this, "Сохранить документ",
+                QString(), "Документ BookCreateEdit (*.bce)");
+            if (docPath.isEmpty()) return;
+            if (!docPath.endsWith(".bce")) docPath += ".bce";
+        }
+        m_document->saveAs(docPath);
+    } else {
+        m_document->save();
+    }
+
+    // 2. Сохраняем проект (.bceproj)
+    if (hasProject()) {
+        // Синхронизируем список документов
+        QString relDoc = m_document->filePath();
+        if (relDoc.startsWith(m_project->projectDir()))
+            relDoc = QDir(m_project->projectDir()).relativeFilePath(relDoc);
+
+        if (m_project->documentPaths().contains(relDoc))
+            m_project->removeDocument(relDoc);
+        m_project->addDocument(relDoc, "BCE");
+
+        m_project->save();
+        statusBar()->showMessage("Проект сохранён: " + m_project->filePath());
+    }
 }
